@@ -1,9 +1,10 @@
+import os
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
-
+from settings import config
 
 app = Flask(__name__)
-app.config.from_pyfile('settings.cfg')
+app.config.from_object(config[os.getenv('FLASK_CONFIG') or 'default'])
 
 db = SQLAlchemy(app)
 
@@ -12,7 +13,7 @@ if not app.debug:
 
     fmt = "%(levelname)s - %(asctime)s %(filename)s:%(lineno)d %(message)s"
     formatter = logging.Formatter(fmt=fmt)
-    log_path = '/var/log/flask/{}.log'.format(__name__)
+    log_path = '/var/log/flask/{}.log'.format(app.name)
     file_handler = logging.FileHandler(log_path)
     file_handler.setFormatter(formatter)
 
