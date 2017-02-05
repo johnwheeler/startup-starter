@@ -1,68 +1,160 @@
 # -*- mode: ruby -*-
-# vi: set ft=ruby :
+# vi: set ft=ruby ts=2 sw=2 expandtab :
 
-# All Vagrant configuration is done below. The "2" in Vagrant.configure
-# configures the configuration version (we support older styles for
-# backwards compatibility). Please don't change it unless you know what
-# you're doing.
-Vagrant.configure("2") do |config|
-  # The most common configuration options are documented and commented below.
-  # For a complete reference, please see the online documentation at
-  # https://docs.vagrantup.com.
+# Project name
+PROJECT = ENV.fetch("PROJECT", "flask-live-starter")
 
-  # Every Vagrant development environment requires a box. You can search for
-  # boxes at https://atlas.hashicorp.com/search.
-  config.vm.box = "debian/jessie64"
+# Project directory
+PROJECT_DIR="/home/vagrant/workspace/#{PROJECT}"
 
-  # Disable automatic box update checking. If you disable this, then
-  # boxes will only be checked for updates when the user runs
-  # `vagrant box outdated`. This is not recommended.
-  # config.vm.box_check_update = false
+# Build directory
+BUILD_SCRIPTS="#{PROJECT_DIR}/build_scripts"
 
-  # Create a forwarded port mapping which allows access to a specific port
-  # within the machine from a port on the host machine. In the example below,
-  # accessing "localhost:8080" will access port 80 on the guest machine.
-  # config.vm.network "forwarded_port", guest: 80, host: 8080
+# UID
+UID = Process.euid
 
-  # Create a private network, which allows host-only access to the machine
-  # using a specific IP.
-  config.vm.network "private_network", ip: "192.168.33.10"
+# Port to access the app outside of the development container
+VAGRANT_PORT=ENV.fetch('VAGRANT_PORT', '8000')
 
-  # Create a public network, which generally matched to bridged network.
-  # Bridged networks make the machine appear as another physical device on
-  # your network.
-  # config.vm.network "public_network"
+# Vagrant config for running the boxes
+ENV['VAGRANT_NO_PARALLEL'] = 'yes'
+ENV['VAGRANT_DEFAULT_PROVIDER'] = 'docker'
 
-  # Share an additional folder to the guest VM. The first argument is
-  # the path on the host to the actual folder. The second argument is
-  # the path on the guest to mount the folder. And the optional third
-  # argument is a set of non-required options.
-  # config.vm.synced_folder "../data", "/vagrant_data"
+# Environment variable
+DOCKER_ENV = {
 
-  # Provider-specific configuration so you can fine-tune various
-  # backing providers for Vagrant. These expose provider-specific options.
-  # Example for VirtualBox:
-  #
-  config.vm.provider "virtualbox" do |vb|
-    # Display the VirtualBox GUI when booting the machine
-    # vb.gui = true
+  # Application
+  'APP_PATH'     => PROJECT_DIR,
+  'APP_NAME'     => PROJECT,
+  'APP_USER'     => "vagrant",
+  'HOST_USER_UID'=> UID,
+  'PROJECT_DIR'  => PROJECT_DIR,
+  'SECRET_KEY'   => 'MyBelovedPrecious',
 
-    # Customize the amount of memory on the VM:
-    vb.memory = "1024"
+  # Database
+  'DB_ENGINE'    => "postgres",
+  'DB_HOST'      => "db",
+  'DB_NAME'      => "vagrant",
+  'DB_USERNAME'  => "vagrant",
+  'DB_PASSWORD'  => "vagrant",
+
+  # SMPT
+  'MAIL_SERVER' => "smtp.sendgrid.net",
+  'MAIL_USERNAME' => "vagrant",
+  'MAIL_PASSWORD' => "vagrant",
+  'ADMIN_EMAIL' => "vagrant@vagrant.com",
+
+  # Debug
+  'DEV_MODE'     => "true",
+  'FLASK_CONFIG' => "development",
+
+  # Virtualenv
+  'VIRTUAL_ENV_PATH' => "#{PROJECT_DIR}/venv",
+  'ENV_NAME'         => "devdocker",
+}
+
+Vagrant.configure(2) do |config|
+
+  config.ssh.forward_agent = true
+  config.ssh.host = "127.0.0.1"
+  config.ssh.port = 2200
+
+  # Postgres container
+  config.vm.define "db" do |db|
+    db.vm.provider "docker" do |d|
+      # For MacOS users. Prevent vagrant from using a VB-based box
+      d.force_host_vm = false
+
+      d.image = "postgres:9.5"
+      d.name = "#{PROJECT}_db"
+      d.ports = ["5432:5432"]
+      d.env = {
+        "POSTGRES_PASSWORD" => DOCKER_ENV['DB_PASSWORD'],
+        "POSTGRES_USER" => DOCKER_ENV['DB_USERNAME'],
+        "POSTGRES_DB" => DOCKER_ENV['DB_NAME'],
+      }
+    end
   end
-  #
-  # View the documentation for the provider you are using for more
-  # information on available options.
 
-  # Define a Vagrant Push strategy for pushing to Atlas. Other push strategies
-  # such as FTP and Heroku are also available. See the documentation at
-  # https://docs.vagrantup.com/v2/push/atlas.html for more information.
-  # config.push.define "atlas" do |push|
-  #   push.app = "YOUR_ATLAS_USERNAME/YOUR_APPLICATION_NAME"
-  # end
 
-  # Enable provisioning with a shell script. Additional provisioners such as
-  # Puppet, Chef, Ansible, Salt, and Docker are also available. Please see the
-  # documentation for more information about their specific syntax and use.
-  # config.vm.provision "shell", path: "provision.sh"
+  # Development container
+  config.vm.define "dev", primary: true do |app|
+
+    app.vm.provider "docker" do |d|
+      # For MacOS users. Prevent vagrant from using a VB-based box
+      d.force_host_vm = false
+
+      # Flask app listens on 8000, redirect on VAGRANT_PORT on host
+      d.ports = ["#{VAGRANT_PORT}:8000"]
+      d.image = "allansimon/allan-docker-dev-python"
+      d.name = "#{PROJECT}_dev"
+
+      # Link to database container
+      d.link "#{PROJECT}_db:#{DOCKER_ENV['DB_HOST']}"
+      d.volumes =  [
+        "#{ENV['PWD']}/:#{PROJECT_DIR}"
+      ]
+      d.env = DOCKER_ENV
+      d.has_ssh = true
+    end
+
+    # so that we can git clone from within the docker
+    app.vm.provision "file", source: "~/.ssh/id_rsa", destination: ".ssh/id_rsa"
+
+    # so that we can git push from inside the docker
+    app.vm.provision "file", source: "~/.gitconfig", destination: ".gitconfig"
+
+    # we can't copy in /root using file provisionner
+    # hence the usage of shell
+    app.vm.provision "permits-root-to-clone", type: "shell" do |s|
+      s.inline = "cp /home/vagrant/.ssh/id_rsa ~/.ssh/id_rsa"
+    end
+
+    # Dev environment provisioning
+    app.vm.provision :shell, :inline => <<-END
+      set -eu
+      sudo cat /etc/container_environment.sh | grep -v 'export _=' | source /dev/stdin
+      apt-get update -y
+
+      # Configure the container behavior at startup/boot
+
+      ZSHRC=/home/vagrant/.zshrc
+      echo "# Go directly to the project directory"  >> $ZSHRC
+      echo 'cd #{PROJECT_DIR}' >>  $ZSHRC
+      echo "# Activate the virtualenv" >> $ZSHRC
+      echo "source #{DOCKER_ENV['VIRTUAL_ENV_PATH']}/bin/activate" >>  $ZSHRC
+
+      # cd to the project directory
+      cd #{PROJECT_DIR}
+
+      # Install debian dependencies
+      sudo apt install -y libpq-dev python-dev libffi-dev libssl-dev
+
+      # Upgrade pip
+      pip install -U pip
+
+      # Install virtualenv
+      pip install virtualenv
+
+      # Create virtualenv
+      virtualenv #{DOCKER_ENV['VIRTUAL_ENV_PATH']}
+
+      # Activate virtualenv (see https://github.com/pypa/virtualenv/issues/150)
+      set +o nounset
+      source #{DOCKER_ENV['VIRTUAL_ENV_PATH']}/bin/activate
+      set -o nounset
+
+      # Install app requirements
+      pip install -r requirements.txt
+
+      # chown the vagrant home to vagrant user. This prevents permission issues
+      chown -R vagrant:vagrant /home/vagrant
+
+      echo "Run 'vagrant ssh' to access the development container."
+    END
+
+    # SSH config. No password required.
+    app.ssh.username = "vagrant"
+    app.ssh.password = ""
+  end
 end
