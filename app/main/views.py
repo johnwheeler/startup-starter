@@ -1,15 +1,16 @@
 from flask import render_template
+from flask import current_app as app
 
-from . import app, db
+from . import main
+from .. import db
 
 
-@app.route('/')
+@main.route('/')
 def index():
     app.logger.debug('DEBUG log message')
     app.logger.info('INFO log message')
     app.logger.warn('WARN log message')
     app.logger.error('ERROR log message')
-
     # Database connection test
     result = None
     try:
@@ -18,7 +19,3 @@ def index():
         pass
 
     return render_template('index.html', result=result)
-
-
-if __name__ == '__main__':
-    app.run(debug=True)

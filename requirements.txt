@@ -4,3 +4,8 @@ Jinja2>=2.8
 psycopg2>=2.6.2
 Flask-SQLAlchemy>=2.1
 gunicorn==19.0.0
+WTForms==2.0.2
+Werkzeug==0.10.4
+Flask-WTF==0.11
+Flask-Migrate==2.0.3
+Flask-Script==2.0.5

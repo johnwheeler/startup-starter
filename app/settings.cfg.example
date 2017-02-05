@@ -1,6 +1,0 @@
-# Generate a secure key with
-# python -c "import os, base64; print(base64.b64encode(os.urandom(24)))"
-SECRET_KEY = ""
-
-SQLALCHEMY_DATABASE_URI = "postgres://username:password@127.0.0.1:5432/database"
-SQLALCHEMY_TRACK_MODIFICATIONS = False
